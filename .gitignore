@@ -3,3 +3,4 @@
 /checkpoints
 /wandb
 /logs
+__pycache__
