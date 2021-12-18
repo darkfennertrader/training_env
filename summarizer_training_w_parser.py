@@ -107,19 +107,15 @@ class DialogSum(Dataset):
 class T5DataModule(pl.LightningDataModule):
     def __init__(
         self,
-        data_dir: str = "/home/solidsnake/ai/datasets/dialogsum/",
-        dialogue_max_token_len: int = 512,
-        summary_max_token_len: int = 128,
-        batch_size: int = 2,
-        n_samples: int = 5,
-        model_dir: str = "/home/solidsnake/ai/Golden_Group/ai-models/development/summarization/t5-small",
+        args,
         view_dataset_stats: bool = False,
     ):
         super().__init__()
-        self.data_dir = data_dir
-        self.batch_size = batch_size
-        self.n_samples = n_samples
-        self.tokenizer = T5Tokenizer.from_pretrained(model_dir)
+        self.args = args
+        self.data_dir = self.args.data_dir
+        self.batch_size = self.args.batch_size
+        self.n_samples = self.args.n_samples
+        self.tokenizer = T5Tokenizer.from_pretrained(self.args.model)
         self.view_dataset_stats = view_dataset_stats
         self.df = pd.DataFrame()
 
@@ -213,6 +209,38 @@ class T5DataModule(pl.LightningDataModule):
             drop_last=False,
         )
 
+    @staticmethod
+    def add_dataset_specific_args(parent_parser):
+        parser = ArgumentParser(parents=[parent_parser], add_help=False)
+        # add dataset specific arguments HERE:
+
+        parser.add_argument(
+            "--dialogue_max_token_len",
+            type=int,
+            default=512,
+        )
+        parser.add_argument(
+            "--summary_max_token_len",
+            type=int,
+            default=128,
+        )
+        parser.add_argument(
+            "--n_samples",
+            type=int,
+            default=5,
+        )
+        parser.add_argument(
+            "--data_dir",
+            type=str,
+            default="/home/solidsnake/ai/datasets/dialogsum/",
+        )
+        parser.add_argument(
+            "--batch_size",
+            type=int,
+            default=2,
+        )
+        return parser
+
 
 class T5Summarizer(pl.LightningModule):
     def __init__(self, args):
@@ -222,6 +250,7 @@ class T5Summarizer(pl.LightningModule):
             self.args.model, return_dict=True
         )
         self.tokenizer = T5Tokenizer.from_pretrained(self.args.model)
+        self.learning_rate = self.args.learning_rate
         self.scorer = rouge_scorer.RougeScorer(
             ["rouge1", "rouge2", "rougeL"], use_stemmer=True
         )
@@ -299,7 +328,7 @@ class T5Summarizer(pl.LightningModule):
         return loss, outputs
 
     def configure_optimizers(self):
-        optimizer = AdamW(self.parameters(), eps=1e-4)
+        optimizer = AdamW(self.parameters(), eps=self.learning_rate)
         # scheduler = get_linear_schedule_with_warmup(
         #     optimizer,
         #     num_warmup_steps=0,
@@ -310,7 +339,7 @@ class T5Summarizer(pl.LightningModule):
     @staticmethod
     def add_model_specific_args(parent_parser):
         parser = ArgumentParser(parents=[parent_parser], add_help=False)
-        # HERE add arguments to pytorch lighting module
+        # add model specific arguments HERE:
         parser.add_argument(
             "-m",
             "--model",
@@ -318,12 +347,19 @@ class T5Summarizer(pl.LightningModule):
             default="/home/solidsnake/ai/Golden_Group/ai-models/development/summarization/t5-small",
             help="name of the model or the path pointing to it",
         )
+        parser.add_argument(
+            "-lr",
+            "--learning_rate",
+            type=float,
+            default=1e-4,
+        )
         return parser
 
 
 def parse_arguments():
     p = ArgumentParser()
     p = T5Summarizer.add_model_specific_args(p)
+    p = T5DataModule.add_dataset_specific_args(p)
     args, _ = p.parse_known_args()
     return args
 
@@ -334,11 +370,6 @@ def main():
 
     print(args)
 
-    pretrained_model_name_or_path = (
-        "/home/solidsnake/ai/Golden_Group/ai-models/development/summarization/t5-small"
-    )
-    dataset_dir = "/home/solidsnake/ai/datasets/dialogsum/"
-
     project = "dialogue-summarizer"
     # wandb.init(project=project)
     # wandb.finish()
@@ -347,7 +378,7 @@ def main():
     pl.seed_everything(42)
 
     # init datamodule
-    dm = T5DataModule(batch_size=2)
+    dm = T5DataModule(args)
 
     # init metrics
     metrics_callback = MetricsCallback()
