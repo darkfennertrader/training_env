@@ -357,8 +357,16 @@ class T5Summarizer(pl.LightningModule):
 
 def parse_arguments():
     p = ArgumentParser()
+    # add PROGRAM specific paramters
+
+    # add MODEL specific parameters
     p = T5Summarizer.add_model_specific_args(p)
+
+    # add DATASET specific parameters
     p = T5DataModule.add_dataset_specific_args(p)
+
+    # add pl.Trainer specigfic parameters
+
     args, _ = p.parse_known_args()
     return args
 
@@ -372,7 +380,8 @@ def main():
     # wandb.finish()
     # wb_logger = WandbLogger(project=project)
 
-    pl.seed_everything(42)
+    # for reproducibility
+    pl.seed_everything(42, workers=True)
 
     # init datamodule
     dm = T5DataModule(args)
@@ -394,6 +403,7 @@ def main():
         log_every_n_steps=1,
         enable_checkpointing=True,
         callbacks=[metrics_callback, model_checkpoint],
+        deterministic=True,  # for reproducibility
     )
 
     # train the model
