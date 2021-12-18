@@ -20,8 +20,8 @@ def tune_asha(num_samples=10, gpus_per_trial=1, data_dir="/ray_tune"):
     scheduler = ASHAScheduler(max_t=5, grace_period=1, reduction_factor=2)
 
     reporter = CLIReporter(
-        parameter_columns=["lr", "batch_size"],
-        metric_columns=["val_loss"],
+        parameter_columns=["lr", "max_epochs"],
+        metric_columns=["training_loss", "val_loss"],
     )
 
     train_fn_with_parameters = tune.with_parameters(

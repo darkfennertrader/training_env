@@ -7,13 +7,15 @@ from torch.utils.data import Dataset, DataLoader, random_split
 from torch import cuda
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
+
 from callback_collections import (
     MyPrintingCallback,
     MetricsCallback,
     early_stopping,
     model_checkpoint,
 )
-from hyperparams_opt import tune_report_callback
+
+# from hyperparams_opt import tune_report_callback
 
 from transformers import (
     AdamW,
