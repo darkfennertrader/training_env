@@ -50,15 +50,14 @@ rcParams["figure.figsize"] = 16, 10
 class DialogSum(Dataset):
     def __init__(
         self,
+        args,
         data: pd.DataFrame,
-        dialogue_max_token_len: int = 512,
-        summary_max_token_len: int = 128,
-        model_dir: str = "/home/solidsnake/ai/Golden_Group/ai-models/development/summarization/t5-small",
     ):
+        self.args = args
         self.data = data
-        self.tokenizer = T5Tokenizer.from_pretrained(model_dir)
-        self.dialogue_max_len = dialogue_max_token_len
-        self.summary_max_len = summary_max_token_len
+        self.tokenizer = T5Tokenizer.from_pretrained(self.args.model)
+        self.dialogue_max_len = self.args.dialogue_max_token_len
+        self.summary_max_len = self.args.summary_max_token_len
 
     def __len__(self):
         return len(self.data)
@@ -169,7 +168,7 @@ class T5DataModule(pl.LightningDataModule):
             plt.show()
 
         # return tokenized dict
-        self.df = DialogSum(df)
+        self.df = DialogSum(self.args, df)
 
     def setup(self, stage=None):
         train_size, val_size = int(0.8 * len(self.df)), int(0.1 * len(self.df))
@@ -367,8 +366,6 @@ def parse_arguments():
 def main():
 
     args = parse_arguments()
-
-    print(args)
 
     project = "dialogue-summarizer"
     # wandb.init(project=project)
