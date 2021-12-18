@@ -1,9 +1,9 @@
 import os
 import re
+import math
 import pandas as pd
 import argparse
 from argparse import ArgumentParser
-import swifter
 from rouge_score import rouge_scorer
 from torch.utils.data import Dataset, DataLoader, random_split
 from torch import cuda
@@ -16,6 +16,11 @@ from callback_collections import (
     early_stopping,
     model_checkpoint,
 )
+
+from ray import tune
+from ray.tune.schedulers import ASHAScheduler, PopulationBasedTraining
+from ray.tune.integration.pytorch_lightning import TuneReportCallback
+from ray.tune import CLIReporter
 
 # from hyperparams_opt import tune_report_callback
 
@@ -123,7 +128,7 @@ class T5DataModule(pl.LightningDataModule):
             self.data_dir + "dialogsum.train.jsonl", lines=True, nrows=self.n_samples
         )
         train = train[["dialogue", "summary"]]
-        train = train.swifter.applymap(
+        train = train.applymap(
             lambda row: re.sub(r" ' ", "'", str(row).replace("\n", " "))
         )
 
@@ -131,16 +136,14 @@ class T5DataModule(pl.LightningDataModule):
             self.data_dir + "dialogsum.dev.jsonl", lines=True, nrows=self.n_samples
         )
         dev = dev[["dialogue", "summary"]]
-        dev = dev.swifter.applymap(
-            lambda row: re.sub(r" ' ", "'", str(row).replace("\n", " "))
-        )
+        dev = dev.applymap(lambda row: re.sub(r" ' ", "'", str(row).replace("\n", " ")))
 
         test = pd.read_json(
             self.data_dir + "dialogsum.test.jsonl", lines=True, nrows=self.n_samples
         )
         test = test[["dialogue", "summary1"]]
         test.rename({"summary1": "summary"}, axis=1, inplace=True)
-        test = test.swifter.applymap(
+        test = test.applymap(
             lambda row: re.sub(r" ' ", "'", str(row).replace("\n", " "))
         )
 
@@ -242,14 +245,15 @@ class T5DataModule(pl.LightningDataModule):
 
 
 class T5Summarizer(pl.LightningModule):
-    def __init__(self, args):
+    def __init__(self, config, args):
         super().__init__()
+        self.save_hyperparameters()
         self.args = args
         self.model = T5ForConditionalGeneration.from_pretrained(
             self.args.model, return_dict=True
         )
         self.tokenizer = T5Tokenizer.from_pretrained(self.args.model)
-        self.learning_rate = self.args.learning_rate
+        self.learning_rate = config["lr"] or self.args.learning_rate
         self.scorer = rouge_scorer.RougeScorer(
             ["rouge1", "rouge2", "rougeL"], use_stemmer=True
         )
@@ -365,20 +369,13 @@ def parse_arguments():
     # add DATASET specific parameters
     p = T5DataModule.add_dataset_specific_args(p)
 
-    # add pl.Trainer specigfic parameters
+    # add pl.Trainer specific parameters
 
     args, _ = p.parse_known_args()
     return args
 
 
-def main():
-
-    args = parse_arguments()
-
-    project = "dialogue-summarizer"
-    # wandb.init(project=project)
-    # wandb.finish()
-    # wb_logger = WandbLogger(project=project)
+def trainer_summarizer(config, args, num_epochs=3, num_gpus=1):
 
     # for reproducibility
     pl.seed_everything(42, workers=True)
@@ -387,22 +384,31 @@ def main():
     dm = T5DataModule(args)
 
     # init metrics
-    metrics_callback = MetricsCallback()
+    # metrics_callback = MetricsCallback()
 
     # init model
-    t5_model = T5Summarizer(args)
+    t5_model = T5Summarizer(config, args)
+
+    # init callbacks
+    metrics = {"loss": "val_loss"}
+    callbacks = [TuneReportCallback(metrics, on="validation_end"), model_checkpoint]
+
+    # project = "dialogue-summarizer"
+    # wandb.init(project=project)
+    # wandb.finish()
+    # wb_logger = WandbLogger(project=project)
 
     # init trainer
     trainer = pl.Trainer(
-        max_epochs=2,
-        enable_progress_bar=True,
+        max_epochs=num_epochs,
+        gpus=math.ceil(num_gpus),
+        # enable_progress_bar=True,
         logger=False,  # wb_logger,
-        gpus=cuda.device_count(),
         # precision=16,
-        num_sanity_val_steps=2,
-        log_every_n_steps=1,
-        enable_checkpointing=True,
-        callbacks=[metrics_callback, model_checkpoint],
+        # num_sanity_val_steps=2,
+        # log_every_n_steps=1,
+        enable_checkpointing=True,  # toggle model saving
+        callbacks=callbacks,
         deterministic=True,  # for reproducibility
     )
 
@@ -413,5 +419,42 @@ def main():
     # trainer.test()
 
 
+def tuner(num_samples=5, num_epochs=3, gpus_per_trial=1):
+
+    args = parse_arguments()
+
+    config = {
+        "lr": tune.loguniform(1e-5, 1e-3),
+    }
+
+    scheduler = ASHAScheduler(max_t=num_epochs, grace_period=1, reduction_factor=2)
+
+    reporter = CLIReporter(
+        parameter_columns=["lr"],
+        metric_columns=["val_loss", "training_loss"],
+    )
+
+    train_fn_with_parameters = tune.with_parameters(
+        trainer_summarizer,
+        args=args,
+        num_epochs=num_epochs,
+        num_gpus=gpus_per_trial,
+    )
+
+    analysis = tune.run(
+        train_fn_with_parameters,
+        resources_per_trial={"cpu": 1, "gpu": gpus_per_trial},
+        metric="loss",
+        mode="min",
+        config=config,
+        num_samples=num_samples,
+        scheduler=scheduler,
+        progress_reporter=reporter,
+        name="tune_t5_asha",
+    )
+
+    print("Best hyperparameters found were: ", analysis.best_config)
+
+
 if __name__ == "__main__":
-    main()
+    tuner()
