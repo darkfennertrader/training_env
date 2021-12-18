@@ -6,6 +6,7 @@ import argparse
 from argparse import ArgumentParser
 from rouge_score import rouge_scorer
 from torch.utils.data import Dataset, DataLoader, random_split
+import torch
 from torch import cuda
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger, WandbLogger
@@ -16,6 +17,7 @@ from callback_collections import (
     early_stopping,
     model_checkpoint,
 )
+from filelock import FileLock
 
 from ray import tune
 from ray.tune.schedulers import ASHAScheduler, PopulationBasedTraining
@@ -50,6 +52,8 @@ from matplotlib import rc
 sns.set(style="whitegrid", palette="muted", font_scale=1.2)
 rcParams["figure.figsize"] = 16, 10
 ##############################################################
+
+torch.cuda.empty_cache()
 
 
 class DialogSum(Dataset):
@@ -259,7 +263,6 @@ class T5Summarizer(pl.LightningModule):
         )
 
     def forward(self, input_ids, attention_mask, decoder_attention_mask, labels=None):
-        # print("inside forward step")
         output = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -269,7 +272,6 @@ class T5Summarizer(pl.LightningModule):
         return output.loss, output.logits
 
     def training_step(self, batch, batch_idx):
-        # print("inside training step")
         loss, _ = self.shared_step(batch, train=True)
         self.log(
             "training_loss",
@@ -294,6 +296,7 @@ class T5Summarizer(pl.LightningModule):
         self.log(
             "val_loss",
             loss,
+            on_step=False,
             on_epoch=True,
             prog_bar=True,
             logger=True,
@@ -331,7 +334,7 @@ class T5Summarizer(pl.LightningModule):
         return loss, outputs
 
     def configure_optimizers(self):
-        optimizer = AdamW(self.parameters(), eps=self.learning_rate)
+        optimizer = AdamW(self.parameters(), lr=self.learning_rate, eps=1e-4)
         # scheduler = get_linear_schedule_with_warmup(
         #     optimizer,
         #     num_warmup_steps=0,
@@ -375,7 +378,7 @@ def parse_arguments():
     return args
 
 
-def trainer_summarizer(config, args, num_epochs=3, num_gpus=1):
+def trainer_summarizer(config, args, num_epochs=3, num_gpus=1, checkpoint_dir=None):
 
     # for reproducibility
     pl.seed_everything(42, workers=True)
@@ -390,7 +393,7 @@ def trainer_summarizer(config, args, num_epochs=3, num_gpus=1):
     t5_model = T5Summarizer(config, args)
 
     # init callbacks
-    metrics = {"loss": "val_loss"}
+    metrics = {"val_loss"}
     callbacks = [TuneReportCallback(metrics, on="validation_end"), model_checkpoint]
 
     # project = "dialogue-summarizer"
@@ -406,10 +409,11 @@ def trainer_summarizer(config, args, num_epochs=3, num_gpus=1):
         logger=False,  # wb_logger,
         # precision=16,
         # num_sanity_val_steps=2,
-        # log_every_n_steps=1,
-        enable_checkpointing=True,  # toggle model saving
+        log_every_n_steps=1,
+        # enable_checkpointing=True,  # toggle model saving
         callbacks=callbacks,
         deterministic=True,  # for reproducibility
+        num_sanity_val_steps=-1,
     )
 
     # train the model
@@ -419,7 +423,7 @@ def trainer_summarizer(config, args, num_epochs=3, num_gpus=1):
     # trainer.test()
 
 
-def tuner(num_samples=5, num_epochs=3, gpus_per_trial=1):
+def tuner(num_samples=4, num_epochs=2, gpus_per_trial=1):
 
     args = parse_arguments()
 
@@ -431,7 +435,7 @@ def tuner(num_samples=5, num_epochs=3, gpus_per_trial=1):
 
     reporter = CLIReporter(
         parameter_columns=["lr"],
-        metric_columns=["val_loss", "training_loss"],
+        metric_columns=["val_loss"],
     )
 
     train_fn_with_parameters = tune.with_parameters(
@@ -439,12 +443,13 @@ def tuner(num_samples=5, num_epochs=3, gpus_per_trial=1):
         args=args,
         num_epochs=num_epochs,
         num_gpus=gpus_per_trial,
+        checkpoint_dir=None,
     )
 
     analysis = tune.run(
         train_fn_with_parameters,
         resources_per_trial={"cpu": 1, "gpu": gpus_per_trial},
-        metric="loss",
+        metric="val_loss",
         mode="min",
         config=config,
         num_samples=num_samples,
@@ -458,3 +463,8 @@ def tuner(num_samples=5, num_epochs=3, gpus_per_trial=1):
 
 if __name__ == "__main__":
     tuner()
+
+    # grab samples to log prediciton on
+    # dm = T5DataModule()
+    # dm.setup()
+    # samples = next(iter(dm.val_dataloader()))

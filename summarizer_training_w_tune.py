@@ -13,7 +13,8 @@ from callback_collections import (
     early_stopping,
     model_checkpoint,
 )
-from hyperparams_opt import tune_report_callback
+
+# from hyperparams_opt import tune_report_callback
 
 from transformers import (
     AdamW,
@@ -338,7 +339,7 @@ if __name__ == "__main__":
     dataset_dir = "/home/solidsnake/ai/datasets/dialogsum/"
 
     project = "dialogue-summarizer"
-    wandb.init(project=project, dir="logs/")
+    wandb.init(project=project)
     # wb_logger = WandbLogger("demo", "wandb/", project=project)
     wandb.finish()
     wb_logger = WandbLogger(project=project)
