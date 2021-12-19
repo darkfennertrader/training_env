@@ -396,17 +396,17 @@ def trainer_summarizer(config, args, num_epochs=3, num_gpus=1, checkpoint_dir=No
     metrics = {"val_loss"}
     callbacks = [TuneReportCallback(metrics, on="validation_end"), model_checkpoint]
 
-    # project = "dialogue-summarizer"
-    # wandb.init(project=project)
-    # wandb.finish()
-    # wb_logger = WandbLogger(project=project)
+    project = "dialogue-summarizer"
+    wandb.finish()
+    wandb.init(project=project)
+    wb_logger = WandbLogger(project=project)
 
     # init trainer
     trainer = pl.Trainer(
         max_epochs=num_epochs,
         gpus=math.ceil(num_gpus),
-        # enable_progress_bar=True,
-        logger=False,  # wb_logger,
+        # logger=False,
+        logger=wb_logger,  # W&B integration
         # precision=16,
         # num_sanity_val_steps=2,
         log_every_n_steps=1,
@@ -468,3 +468,5 @@ if __name__ == "__main__":
     # dm = T5DataModule()
     # dm.setup()
     # samples = next(iter(dm.val_dataloader()))
+
+    # print(dir(pl.Trainer()))
