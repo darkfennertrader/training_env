@@ -397,7 +397,6 @@ def trainer_summarizer(config, args, num_epochs=3, num_gpus=1, checkpoint_dir=No
     callbacks = [TuneReportCallback(metrics, on="validation_end"), model_checkpoint]
 
     project = "dialogue-summarizer"
-    wandb.finish()
     wandb.init(project=project)
     wb_logger = WandbLogger(project=project)
 
@@ -418,6 +417,8 @@ def trainer_summarizer(config, args, num_epochs=3, num_gpus=1, checkpoint_dir=No
 
     # train the model
     trainer.fit(t5_model, dm)
+
+    wandb.finish()
 
     # optionally: run test
     # trainer.test()

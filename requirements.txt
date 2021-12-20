@@ -13,3 +13,4 @@ swifter==1.0.9
 torch-tb-profiler==0.3.1
 wandb==0.12.9
 ray[tune]
+py3nvml==0.2.7
