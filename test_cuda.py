@@ -5,7 +5,7 @@ import gc
 
 def get_cuda_memory_info():
     t = torch.cuda.get_device_properties(0).total_memory
-    c = torch.cuda.memory_cached(0)
+    c = torch.cuda.memory_reserved(0)
     a = torch.cuda.memory_allocated(0)
     f = c - a  # free inside cache
     nvmlInit()
